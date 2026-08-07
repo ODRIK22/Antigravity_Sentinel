@@ -1,5 +1,5 @@
 """
-Motor de análisis estático híbrido (AST de Python + Motor Regex Multilenguaje + SRI HTML) para Antigravity Sentinel.
+Motor de análisis estático híbrido (AST de Python + Motor Regex Multilenguaje + SRI HTML + NoSQL Injection) para Antigravity Sentinel.
 """
 
 import ast
@@ -17,7 +17,7 @@ class IssueItem:
     file_path: str
     line_number: int
     severity: str  # "ALTA", "MEDIA", "BAJA"
-    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "TYP001"
+    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "SEC006", "TYP001"
     message: str
 
 
@@ -89,6 +89,13 @@ SECURITY_PATTERNS: tuple[RegexSecurityPattern, ...] = (
         severity="MEDIA",
         pattern=re.compile(r"<(?:script\s+[^>]*src|link\s+[^>]*href)=['\"]https?://[^'\"]+['\"](?![^>]*\bintegrity=)[^>]*>", re.IGNORECASE),
         message="Inclusión de recurso CDN externo en HTML sin el atributo de seguridad Subresource Integrity (SRI).",
+    ),
+    # SEC006: Inyección NoSQL (Uso peligroso del operador $where en MongoDB o consultas concatenadas)
+    RegexSecurityPattern(
+        code="SEC006",
+        severity="ALTA",
+        pattern=re.compile(r"[\{\s,]\$where\s*:", re.IGNORECASE),
+        message="Riesgo de Inyección NoSQL detectado por el uso del operador $where en consultas a MongoDB.",
     ),
 )
 

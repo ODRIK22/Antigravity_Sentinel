@@ -6,7 +6,7 @@ from typing import Final
 
 # Nombre de la aplicación y versión
 APP_NAME: Final[str] = "Antigravity Sentinel"
-VERSION: Final[str] = "0.3.0"
+VERSION: Final[str] = "0.4.0"
 
 # Extensiones de archivos de código soportadas para análisis
 SUPPORTED_EXTENSIONS: Final[set[str]] = {
@@ -34,6 +34,10 @@ IGNORE_DIRS: Final[set[str]] = {
     ".specify",
     ".mypy_cache",
     ".pytest_cache",
+    "vendor",
+    "lib",
+    "assets/vendor",
+    "public/lib",
 }
 
 # Constantes de formato y colores ANSI para consola

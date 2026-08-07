@@ -1,5 +1,5 @@
 """
-Pruebas unitarias para el motor de análisis estático multilenguaje (AST + Regex + HTML SRI).
+Pruebas unitarias para el motor de análisis estático multilenguaje (AST + Regex + HTML SRI + NoSQL Injection).
 """
 
 from pathlib import Path
@@ -72,3 +72,17 @@ def test_analyze_html_sri_missing(tmp_path: Path) -> None:
     codes = [issue.code for issue in issues]
 
     assert "SEC005" in codes  # Falta SRI en CDN externo
+
+
+def test_analyze_nosql_injection(tmp_path: Path) -> None:
+    js_nosql_code = """const user = db.users.find({
+    $where: "this.username == '" + userInput + "'"
+});
+"""
+    nosql_file = tmp_path / "query.js"
+    nosql_file.write_text(js_nosql_code, encoding="utf-8")
+
+    issues = analyze_file(nosql_file)
+    codes = [issue.code for issue in issues]
+
+    assert "SEC006" in codes  # NoSQL injection con operador $where
