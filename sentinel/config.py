@@ -6,7 +6,7 @@ from typing import Final
 
 # Nombre de la aplicación y versión
 APP_NAME: Final[str] = "Antigravity Sentinel"
-VERSION: Final[str] = "0.4.0"
+VERSION: Final[str] = "0.5.0"
 
 # Extensiones de archivos de código soportadas para análisis
 SUPPORTED_EXTENSIONS: Final[set[str]] = {
@@ -39,6 +39,10 @@ IGNORE_DIRS: Final[set[str]] = {
     "assets/vendor",
     "public/lib",
 }
+
+# Constantes para conector opcional de IA Local (Ollama)
+OLLAMA_DEFAULT_HOST: Final[str] = "http://localhost:11434"
+OLLAMA_DEFAULT_MODEL: Final[str] = "deepseek-coder"
 
 # Constantes de formato y colores ANSI para consola
 COLOR_RED: Final[str] = "\033[91m"

@@ -1,5 +1,5 @@
 """
-Motor de análisis estático híbrido (AST de Python + Motor Regex Multilenguaje + SRI HTML + NoSQL Injection) para Antigravity Sentinel.
+Motor de análisis estático híbrido (AST de Python con Taint Analysis + Motor Regex Multilenguaje + SRI HTML) para Antigravity Sentinel.
 """
 
 import ast
@@ -17,7 +17,7 @@ class IssueItem:
     file_path: str
     line_number: int
     severity: str  # "ALTA", "MEDIA", "BAJA"
-    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "SEC006", "TYP001"
+    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "SEC006", "TAINT001", "TYP001"
     message: str
 
 
@@ -90,7 +90,7 @@ SECURITY_PATTERNS: tuple[RegexSecurityPattern, ...] = (
         pattern=re.compile(r"<(?:script\s+[^>]*src|link\s+[^>]*href)=['\"]https?://[^'\"]+['\"](?![^>]*\bintegrity=)[^>]*>", re.IGNORECASE),
         message="Inclusión de recurso CDN externo en HTML sin el atributo de seguridad Subresource Integrity (SRI).",
     ),
-    # SEC006: Inyección NoSQL (Uso peligroso del operador $where en MongoDB o consultas concatenadas)
+    # SEC006: Inyección NoSQL (Uso peligroso del operador $where en MongoDB)
     RegexSecurityPattern(
         code="SEC006",
         severity="ALTA",
@@ -99,16 +99,56 @@ SECURITY_PATTERNS: tuple[RegexSecurityPattern, ...] = (
     ),
 )
 
+INPUT_SOURCES: set[str] = {"req.body", "req.query", "req.params", "input_data", "user_input", "sys.argv", "input"}
+CRITICAL_SINKS: set[str] = {"eval", "exec", "system", "os.system", "subprocess.call", "query.find", "execute"}
+
 
 class ASTQualityVisitor(ast.NodeVisitor):
-    """Recorre el árbol AST de Python recolectando advertencias de tipado y seguridad defensiva."""
+    """Recorre el árbol AST de Python ejecutando Taint Analysis ligero e inspección de calidad."""
 
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
         self.issues: list[IssueItem] = []
+        self.tainted_vars: set[str] = set()
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        """Rastrear si una variable recibe datos desde una fuente de entrada de usuario (Source)."""
+        # Verificar el lado derecho de la asignación
+        value_str = ""
+        if isinstance(node.value, ast.Name):
+            value_str = node.value.id
+        elif isinstance(node.value, ast.Attribute):
+            value_str = f"{node.value.value.id if isinstance(node.value.value, ast.Name) else ''}.{node.value.attr}"
+        elif isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+            value_str = node.value.func.id
+
+        is_tainted_source = any(source in value_str for source in INPUT_SOURCES) or value_str in self.tainted_vars
+
+        if is_tainted_source:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.tainted_vars.add(target.id)
+
+        self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Verifica que las funciones posean anotación de retorno y tipos en argumentos."""
+        """Verifica que las funciones posean anotaciones de retorno y parámetros, e inspecciona Taint en argumentos."""
+        # Marcar argumentos sospechosos como 'user_input' o 'input_data' como contaminados
+        for arg in node.args.args:
+            if arg.arg in ("user_input", "input_data", "payload", "raw_data"):
+                self.tainted_vars.add(arg.arg)
+
+            if arg.annotation is None and arg.arg not in ("self", "cls"):
+                self.issues.append(
+                    IssueItem(
+                        file_path=self.file_path,
+                        line_number=node.lineno,
+                        severity="MEDIA",
+                        code="TYP002",
+                        message=f"El argumento '{arg.arg}' en la función '{node.name}' carece de anotación de tipo.",
+                    )
+                )
+
         if node.returns is None and node.name != "__init__":
             self.issues.append(
                 IssueItem(
@@ -120,43 +160,68 @@ class ASTQualityVisitor(ast.NodeVisitor):
                 )
             )
 
-        for arg in node.args.args:
-            if arg.annotation is None and arg.arg != "self" and arg.arg != "cls":
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """Inspecciona si una variable contaminada (tainted) fluye hacia un Sink crítico."""
+        func_name = ""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            func_name = node.func.attr
+
+        if func_name in CRITICAL_SINKS or any(sink in func_name for sink in ("eval", "exec", "system")):
+            # Verificar si algún argumento está en self.tainted_vars
+            for arg in node.args:
+                arg_name = ""
+                if isinstance(arg, ast.Name):
+                    arg_name = arg.id
+                elif isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
+                    arg_name = arg.value.id
+
+                if arg_name in self.tainted_vars:
+                    self.issues.append(
+                        IssueItem(
+                            file_path=self.file_path,
+                            line_number=node.lineno,
+                            severity="ALTA",
+                            code="TAINT001",
+                            message=f"Taint Analysis: Variable no sanitizada '{arg_name}' fluye desde la entrada hasta la función crítica '{func_name}'.",
+                        )
+                    )
+
+        if func_name == "open":
+            has_encoding = any(kw.arg == "encoding" for kw in node.keywords)
+            if not has_encoding:
                 self.issues.append(
                     IssueItem(
                         file_path=self.file_path,
                         line_number=node.lineno,
-                        severity="MEDIA",
-                        code="TYP002",
-                        message=f"El argumento '{arg.arg}' en la función '{node.name}' carece de anotación de tipo.",
+                        severity="BAJA",
+                        code="IO001",
+                        message="Llamada a 'open()' sin especificar explícitamente el parámetro 'encoding'.",
                     )
                 )
 
         self.generic_visit(node)
 
-    def visit_Call(self, node: ast.Call) -> None:
-        """Inspecciona llamadas a funciones en busca de usos como open() sin encoding."""
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-            if func_name == "open":
-                has_encoding = any(kw.arg == "encoding" for kw in node.keywords)
-                if not has_encoding:
-                    self.issues.append(
-                        IssueItem(
-                            file_path=self.file_path,
-                            line_number=node.lineno,
-                            severity="BAJA",
-                            code="IO001",
-                            message="Llamada a 'open()' sin especificar explícitamente el parámetro 'encoding'.",
-                        )
-                    )
 
-        self.generic_visit(node)
+def _strip_comments(line: str) -> str:
+    """Elimina comentarios de una línea de código para evitar falsos positivos."""
+    stripped = line.strip()
+    if stripped.startswith("#") or stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+        return ""
+    # Remover comentarios inline simples
+    if "#" in line:
+        line = line.split("#")[0]
+    elif "//" in line and not ("http://" in line or "https://" in line):
+        line = line.split("//")[0]
+    return line
 
 
 def analyze_file(file_path: Path) -> Sequence[IssueItem]:
     """
-    Analiza de forma estática cualquier archivo de código fuente soportado (Python, JS, TS, PHP, HTML, JSON, .env, etc.).
+    Analiza de forma estática cualquier archivo de código fuente soportado ejecutando Taint Analysis y filtrado de comentarios.
 
     Args:
         file_path: Ruta del archivo a analizar.
@@ -184,10 +249,14 @@ def analyze_file(file_path: Path) -> Sequence[IssueItem]:
 
     lines = source_code.splitlines()
 
-    # 1. Análisis por Reglas de Patrones (Regex Multilenguaje)
-    for line_idx, line in enumerate(lines, start=1):
+    # 1. Análisis por Reglas de Patrones con Filtrado de Comentarios
+    for line_idx, raw_line in enumerate(lines, start=1):
+        clean_line = _strip_comments(raw_line)
+        if not clean_line.strip():
+            continue
+
         for rule in SECURITY_PATTERNS:
-            if rule.pattern.search(line):
+            if rule.pattern.search(clean_line):
                 issues.append(
                     IssueItem(
                         file_path=str(file_path),
@@ -198,7 +267,7 @@ def analyze_file(file_path: Path) -> Sequence[IssueItem]:
                     )
                 )
 
-    # 2. Análisis sintáctico preciso AST (exclusivo para archivos Python)
+    # 2. Taint Analysis y AST Avanzado para archivos Python
     if file_path.suffix == ".py":
         try:
             tree = ast.parse(source_code, filename=str(file_path))
