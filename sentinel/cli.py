@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from sentinel.config import APP_NAME, VERSION
+from sentinel.config import APP_NAME, VERSION, SUPPORTED_EXTENSIONS, IGNORE_DIRS
 from sentinel.core.sanitizer import sanitize_path, SentinelSanitizerError
 from sentinel.core.analyzer import analyze_file, IssueItem
 from sentinel.core.reporter import format_console_report, format_json_report
@@ -17,13 +17,13 @@ def main() -> None:
     """Punto de entrada de la CLI."""
     parser = argparse.ArgumentParser(
         prog="sentinel",
-        description=f"{APP_NAME} v{VERSION} - Módulo de Aseguramiento de Calidad y Análisis Estático Defensivo.",
+        description=f"{APP_NAME} v{VERSION} - Módulo Multilenguaje de Aseguramiento de Calidad y Análisis Estático Defensivo.",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Subcomandos disponibles")
 
     # Subcomando scan
-    scan_parser = subparsers.add_parser("scan", help="Escanea un archivo o directorio en busca de problemas de calidad.")
+    scan_parser = subparsers.add_parser("scan", help="Escanea un archivo o directorio en busca de problemas de calidad y seguridad multilenguaje.")
     scan_parser.add_argument("--path", required=True, type=str, help="Ruta del directorio o archivo a analizar.")
     scan_parser.add_argument("--format", choices=["console", "json"], default="console", help="Formato de salida del reporte.")
 
@@ -45,8 +45,12 @@ def main() -> None:
             if target.is_file():
                 all_issues.extend(analyze_file(target))
             elif target.is_dir():
-                for py_file in target.rglob("*.py"):
-                    all_issues.extend(analyze_file(py_file))
+                for item in target.rglob("*"):
+                    # Omitir si la ruta pasa por algún directorio en IGNORE_DIRS
+                    if any(ignored in item.parts for ignored in IGNORE_DIRS):
+                        continue
+                    if item.is_file() and (item.suffix in SUPPORTED_EXTENSIONS or item.name == ".env"):
+                        all_issues.extend(analyze_file(item))
 
             if args.format == "json":
                 print(format_json_report(all_issues))

@@ -1,11 +1,14 @@
 """
-Motor de análisis estático basado en AST (Abstract Syntax Tree) para Python 3.11+.
+Motor de análisis estático híbrido (AST de Python + Motor Regex Multilenguaje) para Antigravity Sentinel.
 """
 
 import ast
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+
+from sentinel.config import SUPPORTED_EXTENSIONS
 
 
 @dataclass(frozen=True)
@@ -14,12 +17,77 @@ class IssueItem:
     file_path: str
     line_number: int
     severity: str  # "ALTA", "MEDIA", "BAJA"
-    code: str      # p.ej. "SEC001", "TYP001"
+    code: str      # p.ej. "SEC001", "SEC002", "TYP001"
     message: str
 
 
+@dataclass(frozen=True)
+class RegexSecurityPattern:
+    """Representa una regla de coincidencia basada en expresiones regulares."""
+    code: str
+    severity: str
+    pattern: re.Pattern[str]
+    message: str
+
+
+# Reglas de patrones de seguridad multilenguaje
+SECURITY_PATTERNS: tuple[RegexSecurityPattern, ...] = (
+    # SEC002: Credenciales, tokens y llaves privadas expuestas
+    RegexSecurityPattern(
+        code="SEC002",
+        severity="ALTA",
+        pattern=re.compile(r"AKIA[0-9A-Z]{16}"),
+        message="Detección de Access Key ID de AWS expuesta en texto plano.",
+    ),
+    RegexSecurityPattern(
+        code="SEC002",
+        severity="ALTA",
+        pattern=re.compile(r"ghp_[a-zA-Z0-9]{36}"),
+        message="Detección de Token de Acceso Personal de GitHub expuesto.",
+    ),
+    RegexSecurityPattern(
+        code="SEC002",
+        severity="ALTA",
+        pattern=re.compile(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----"),
+        message="Detección de Llave Privada expuesta en el código.",
+    ),
+    RegexSecurityPattern(
+        code="SEC002",
+        severity="ALTA",
+        pattern=re.compile(r"(?:api[_-]?key|secret[_-]?key|password|passwd)\s*[:=]\s*['\"][^'\"]{6,}['\"]", re.IGNORECASE),
+        message="Asignación directa de credenciales o clave secreta en texto plano.",
+    ),
+    # SEC003: Funciones de ejecución peligrosa multilenguaje
+    RegexSecurityPattern(
+        code="SEC003",
+        severity="ALTA",
+        pattern=re.compile(r"\b(?:eval|exec)\s*\("),
+        message="Uso de función de ejecución dinámica peligrosa (eval/exec).",
+    ),
+    RegexSecurityPattern(
+        code="SEC003",
+        severity="MEDIA",
+        pattern=re.compile(r"\.innerHTML\s*="),
+        message="Asignación directa a innerHTML (Riesgo potencial de Cross-Site Scripting XSS).",
+    ),
+    RegexSecurityPattern(
+        code="SEC003",
+        severity="ALTA",
+        pattern=re.compile(r"\b(?:shell_exec|passthru|system)\s*\("),
+        message="Llamada a función de ejecución de comandos del sistema operativo.",
+    ),
+    # SEC004: Cadenas de base de datos sin encriptar o con credenciales expuestas
+    RegexSecurityPattern(
+        code="SEC004",
+        severity="ALTA",
+        pattern=re.compile(r"(?:mongodb|postgres|postgresql|mysql)://[^:]+:[^@]+@"),
+        message="Cadena de conexión a base de datos con credenciales expuestas en texto plano.",
+    ),
+)
+
+
 class ASTQualityVisitor(ast.NodeVisitor):
-    """Recorre el árbol AST recolectando advertencias de tipado y seguridad defensiva."""
+    """Recorre el árbol AST de Python recolectando advertencias de tipado y seguridad defensiva."""
 
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
@@ -53,21 +121,10 @@ class ASTQualityVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Inspecciona llamadas a funciones en busca de usos inseguros como eval() o exec()."""
+        """Inspecciona llamadas a funciones en busca de usos como open() sin encoding."""
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
-            if func_name in ("eval", "exec"):
-                self.issues.append(
-                    IssueItem(
-                        file_path=self.file_path,
-                        line_number=node.lineno,
-                        severity="ALTA",
-                        code="SEC001",
-                        message=f"Uso inseguro detectado: Llamada a la función integrada '{func_name}'.",
-                    )
-                )
-            elif func_name == "open":
-                # Verifica si se especifica la codificación encoding="utf-8"
+            if func_name == "open":
                 has_encoding = any(kw.arg == "encoding" for kw in node.keywords)
                 if not has_encoding:
                     self.issues.append(
@@ -85,23 +142,21 @@ class ASTQualityVisitor(ast.NodeVisitor):
 
 def analyze_file(file_path: Path) -> Sequence[IssueItem]:
     """
-    Analiza un archivo de código Python de forma estática leyendo su árbol AST.
+    Analiza de forma estática cualquier archivo de código fuente soportado (Python, JS, TS, PHP, JSON, .env, etc.).
 
     Args:
-        file_path: Ruta del archivo .py a analizar.
+        file_path: Ruta del archivo a analizar.
 
     Returns:
         Secuencia de incidencias detectadas.
     """
-    if not file_path.exists() or file_path.suffix != ".py":
+    if not file_path.exists() or file_path.suffix not in SUPPORTED_EXTENSIONS and file_path.name != ".env":
         return []
 
+    issues: list[IssueItem] = []
+
     try:
-        source_code = file_path.read_text(encoding="utf-8")
-        tree = ast.parse(source_code, filename=str(file_path))
-        visitor = ASTQualityVisitor(file_path=str(file_path))
-        visitor.visit(tree)
-        return visitor.issues
+        source_code = file_path.read_text(encoding="utf-8", errors="ignore")
     except Exception as exc:
         return [
             IssueItem(
@@ -109,6 +164,35 @@ def analyze_file(file_path: Path) -> Sequence[IssueItem]:
                 line_number=1,
                 severity="ALTA",
                 code="ERR001",
-                message=f"Error al analizar sintaxis del archivo: {str(exc)}",
+                message=f"Error al leer el archivo: {str(exc)}",
             )
         ]
+
+    lines = source_code.splitlines()
+
+    # 1. Análisis por Reglas de Patrones (Regex Multilenguaje)
+    for line_idx, line in enumerate(lines, start=1):
+        for rule in SECURITY_PATTERNS:
+            if rule.pattern.search(line):
+                issues.append(
+                    IssueItem(
+                        file_path=str(file_path),
+                        line_number=line_idx,
+                        severity=rule.severity,
+                        code=rule.code,
+                        message=rule.message,
+                    )
+                )
+
+    # 2. Análisis sintáctico preciso AST (exclusivo para archivos Python)
+    if file_path.suffix == ".py":
+        try:
+            tree = ast.parse(source_code, filename=str(file_path))
+            visitor = ASTQualityVisitor(file_path=str(file_path))
+            visitor.visit(tree)
+            issues.extend(visitor.issues)
+        except Exception:
+            # Si el archivo Python contiene sintaxis incompleta, el motor Regex ya habrá procesado las líneas
+            pass
+
+    return issues
