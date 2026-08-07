@@ -1,11 +1,12 @@
 """
-Conector opcional para IA Local (Ollama) utilizando la biblioteca estándar de Python (Zero Trust / 100% Offline).
+Conector opcional para IA Local (Ollama) con extracción de contexto enriquecido (Zero Trust / 100% Offline).
 """
 
 import json
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
+from pathlib import Path
 from sentinel.config import OLLAMA_DEFAULT_HOST, OLLAMA_DEFAULT_MODEL
 from sentinel.core.analyzer import IssueItem
 
@@ -25,9 +26,31 @@ class OllamaClient:
         self.host = host.rstrip("/")
         self.model = model
 
+    def _extract_surrounding_context(self, file_path: str, line_number: int, context_lines: int = 5) -> str:
+        """Extrae el bloque de código circundante (+/- context_lines) alrededor de la línea con incidencia."""
+        path = Path(file_path)
+        if not path.exists() or not path.is_file():
+            return ""
+
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            start = max(0, line_number - context_lines - 1)
+            end = min(len(lines), line_number + context_lines)
+
+            context_snippet = []
+            for idx in range(start, end):
+                current_line = idx + 1
+                prefix = "->" if current_line == line_number else "  "
+                context_snippet.append(f"{prefix} {current_line:4d} | {lines[idx]}")
+
+            return "\n".join(context_snippet)
+        except Exception:
+            return ""
+
     def explain_issues(self, file_path: str, issues: list[IssueItem]) -> OllamaExplanationResult:
         """
-        Envía un resumen de las incidencias a Ollama local para obtener una explicación técnica y contextual.
+        Envía un resumen enriquecido con el contexto circundante de las incidencias a Ollama local
+        para obtener una explicación técnica y contextual precisa.
 
         Args:
             file_path: Ruta del archivo auditado.
@@ -44,11 +67,21 @@ class OllamaClient:
             )
 
         prompt_lines: list[str] = [
-            f"Actúa como un auditor de seguridad de software. Revisa estas {len(issues)} incidencias en {file_path} y provee una breve explicación técnica en español sobre el impacto y cómo solucionarlo:",
+            f"Actúa como un arquitecto senior de seguridad AppSec. Revisa estas {len(issues)} incidencias detectadas en {file_path} y su contexto circundante. Provee una explicación detallada en español sobre el riesgo y cómo refactorizar el código de forma segura:",
+            "",
         ]
 
         for issue in issues:
-            prompt_lines.append(f"- Línea {issue.line_number} [{issue.code}] ({issue.severity}): {issue.message}")
+            prompt_lines.append(f"### Incidencia Línea {issue.line_number} [{issue.code}] ({issue.severity}): {issue.message}")
+            snippet = self._extract_surrounding_context(issue.file_path, issue.line_number)
+            if snippet:
+                prompt_lines.extend([
+                    "Contexto del Código:",
+                    "```",
+                    snippet,
+                    "```",
+                ])
+            prompt_lines.append("")
 
         prompt = "\n".join(prompt_lines)
         url = f"{self.host}/api/generate"

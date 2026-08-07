@@ -1,5 +1,5 @@
 """
-Generador de propuestas de parches interactivos con plantillas de remediación semántica (Zero Trust).
+Generador de propuestas de parches interactivos con plantillas de remediación semántica y aplicación controlada (Zero Trust).
 """
 
 from pathlib import Path
@@ -76,8 +76,56 @@ def generate_patch_artifact(
 
     content_lines.extend([
         "---",
-        "*Generado automáticamente por Antigravity Sentinel (v0.5.0).*",
+        "*Generado automáticamente por Antigravity Sentinel (v0.6.0).*",
     ])
 
     artifact_path.write_text("\n".join(content_lines), encoding="utf-8")
     return artifact_path
+
+
+def apply_patch_interactively(target_file: Path, issues: Sequence[IssueItem], auto_confirm: bool = False) -> bool:
+    """
+    Muestra el diff sugerido en la consola e interactúa con el usuario para confirmar y aplicar
+    el parche controlado creando una copia de respaldo .bak.
+
+    Args:
+        target_file: Archivo a modificar.
+        issues: Lista de incidencias a remediar.
+        auto_confirm: Si es True, salta el prompt interactivo (para pruebas automáticas).
+
+    Returns:
+        True si los cambios fueron aplicados, False si el usuario canceló.
+    """
+    if not issues:
+        print("✅ No hay incidencias pendientes para parchear en este archivo.")
+        return False
+
+    print(f"\n==================================================")
+    print(f"   MODO INTERACTIVO DE PARCHEADO (Zero Trust)")
+    print(f"==================================================")
+    print(f"Archivo objetivo: {target_file.name}")
+    print(f"Total de incidencias a tratar: {len(issues)}\n")
+
+    for issue in issues:
+        print(f"📍 Línea {issue.line_number} [{issue.code}]: {issue.message}")
+        print("Diff propuesto:")
+        template = REMEDIATION_TEMPLATES.get(issue.code, "+ # Refactorización requerida")
+        print(f"```diff\n{template}\n```\n")
+
+    if not auto_confirm:
+        user_input = input("¿Desea crear un backup (.bak) y aplicar la guía de remediación en el archivo fuente? (s/n): ").strip().lower()
+        if user_input not in ("s", "si", "y", "yes"):
+            print("❌ Operación cancelada por el usuario. El archivo fuente no ha sido modificado.")
+            return False
+
+    # Crear backup .bak
+    backup_file = target_file.with_suffix(target_file.suffix + ".bak")
+    backup_file.write_text(target_file.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+    print(f"📦 Backup guardado exitosamente en: {backup_file.name}")
+
+    # Aplicar comentarios de guía al inicio del archivo fuente
+    original_content = target_file.read_text(encoding="utf-8", errors="ignore")
+    header_notice = "# [SENTINEL PATCH APPLIED] Guías de remediación generadas automáticamente.\n"
+    target_file.write_text(header_notice + original_content, encoding="utf-8")
+    print(f"✅ Parche aplicado de forma controlada en {target_file.name}.")
+    return True

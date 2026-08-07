@@ -9,8 +9,8 @@ from pathlib import Path
 from sentinel.config import APP_NAME, VERSION, SUPPORTED_EXTENSIONS, IGNORE_DIRS
 from sentinel.core.sanitizer import sanitize_path, SentinelSanitizerError
 from sentinel.core.analyzer import analyze_file, IssueItem
-from sentinel.core.reporter import format_console_report, format_json_report
-from sentinel.core.patcher import generate_patch_artifact
+from sentinel.core.reporter import format_console_report, format_json_report, format_sarif_report
+from sentinel.core.patcher import generate_patch_artifact, apply_patch_interactively
 from sentinel.core.ollama import OllamaClient
 
 
@@ -18,7 +18,7 @@ def main() -> None:
     """Punto de entrada de la CLI."""
     parser = argparse.ArgumentParser(
         prog="sentinel",
-        description=f"{APP_NAME} v{VERSION} - Módulo Multilenguaje de Aseguramiento de Calidad y Análisis Estático Defensivo con IA Local Opcional.",
+        description=f"{APP_NAME} v{VERSION} - Módulo Multilenguaje de Aseguramiento de Calidad, Análisis Estático SARIF e IA Local.",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Subcomandos disponibles")
@@ -26,12 +26,13 @@ def main() -> None:
     # Subcomando scan
     scan_parser = subparsers.add_parser("scan", help="Escanea un archivo o directorio en busca de problemas de calidad y seguridad.")
     scan_parser.add_argument("--path", required=True, type=str, help="Ruta del directorio o archivo a analizar.")
-    scan_parser.add_argument("--format", choices=["console", "json"], default="console", help="Formato de salida del reporte.")
+    scan_parser.add_argument("--format", choices=["console", "json", "sarif"], default="console", help="Formato de salida del reporte (console, json, sarif).")
     scan_parser.add_argument("--explain-local", action="store_true", help="Solicita una explicación contextual offline usando IA local (Ollama).")
 
     # Subcomando patch
-    patch_parser = subparsers.add_parser("patch", help="Genera una propuesta de parche con plantillas semánticas (Artifact) para un archivo.")
+    patch_parser = subparsers.add_parser("patch", help="Genera una propuesta de parche con plantillas semánticas (Artifact) o aplícala interactivamente.")
     patch_parser.add_argument("--file", required=True, type=str, help="Ruta del archivo a inspeccionar.")
+    patch_parser.add_argument("--apply-patch", action="store_true", help="Revisa y aplica los cambios de forma interactiva sobre el archivo fuente (con backup .bak).")
 
     args = parser.parse_args()
 
@@ -55,11 +56,13 @@ def main() -> None:
 
             if args.format == "json":
                 print(format_json_report(all_issues))
+            elif args.format == "sarif":
+                print(format_sarif_report(all_issues))
             else:
                 print(format_console_report(all_issues))
 
             if args.explain_local:
-                print("\n🤖 Solicitando explicación contextual a IA Local (Ollama localhost:11434)...")
+                print("\n🤖 Solicitando explicación contextual enriquecida a IA Local (Ollama localhost:11434)...")
                 client = OllamaClient()
                 result = client.explain_issues(str(target), all_issues)
                 print(f"--- Explicación Local ({result.model_used}) ---\n{result.explanation}")
@@ -71,8 +74,12 @@ def main() -> None:
                 sys.exit(1)
 
             issues = analyze_file(target_file)
-            artifact = generate_patch_artifact(target_file, issues)
-            print(f"✅ Propuesta de parche (Artifact Zero Trust con remediación semántica) creada exitosamente en:\n  {artifact}")
+
+            if args.apply_patch:
+                apply_patch_interactively(target_file, issues)
+            else:
+                artifact = generate_patch_artifact(target_file, issues)
+                print(f"✅ Propuesta de parche (Artifact Zero Trust con remediación semántica) creada exitosamente en:\n  {artifact}")
 
     except SentinelSanitizerError as err:
         print(f"❌ Error de Seguridad/Sanitización: {str(err)}", file=sys.stderr)

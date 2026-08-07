@@ -1,10 +1,10 @@
 """
-Módulo de generación de reportes estructurados para consola (con colores ANSI) y JSON.
+Módulo de generación de reportes estructurados para consola (con colores ANSI), JSON y estándar SARIF v2.1.0.
 """
 
 import json
 from typing import Sequence
-from sentinel.config import COLOR_RED, COLOR_YELLOW, COLOR_GREEN, COLOR_BOLD, COLOR_RESET
+from sentinel.config import APP_NAME, VERSION, COLOR_RED, COLOR_YELLOW, COLOR_GREEN, COLOR_BOLD, COLOR_RESET
 from sentinel.core.analyzer import IssueItem
 
 
@@ -58,3 +58,71 @@ def format_json_report(issues: Sequence[IssueItem]) -> str:
         for item in issues
     ]
     return json.dumps({"resumen": {"total_incidencias": len(issues)}, "incidencias": data}, indent=2, ensure_ascii=False)
+
+
+def format_sarif_report(issues: Sequence[IssueItem]) -> str:
+    """
+    Genera un reporte en formato SARIF v2.1.0 (Static Analysis Results Interchange Format)
+    compatible con GitHub Code Scanning, GitLab Security y CodeQL.
+    """
+    severity_map = {
+        "ALTA": "error",
+        "MEDIA": "warning",
+        "BAJA": "note",
+    }
+
+    results = []
+    rules = {}
+
+    for item in issues:
+        rule_id = item.code
+        if rule_id not in rules:
+            rules[rule_id] = {
+                "id": rule_id,
+                "shortDescription": {"text": f"Regla de Seguridad Sentinel {rule_id}"},
+                "fullDescription": {"text": item.message},
+                "defaultConfiguration": {
+                    "level": severity_map.get(item.severity, "warning")
+                }
+            }
+
+        # Formatear ruta para URI relativa/normalizada
+        uri_path = item.file_path.replace("\\", "/")
+
+        results.append({
+            "ruleId": rule_id,
+            "level": severity_map.get(item.severity, "warning"),
+            "message": {"text": item.message},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": uri_path,
+                            "uriBaseId": "%SRCROOT%"
+                        },
+                        "region": {
+                            "startLine": max(1, item.line_number)
+                        }
+                    }
+                }
+            ]
+        })
+
+    sarif_structure = {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": APP_NAME,
+                        "version": VERSION,
+                        "rules": list(rules.values())
+                    }
+                },
+                "results": results
+            }
+        ]
+    }
+
+    return json.dumps(sarif_structure, indent=2, ensure_ascii=False)
