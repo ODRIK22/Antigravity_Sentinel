@@ -1,5 +1,5 @@
 """
-Motor de análisis estático híbrido (AST de Python + Motor Regex Multilenguaje) para Antigravity Sentinel.
+Motor de análisis estático híbrido (AST de Python + Motor Regex Multilenguaje + SRI HTML) para Antigravity Sentinel.
 """
 
 import ast
@@ -17,7 +17,7 @@ class IssueItem:
     file_path: str
     line_number: int
     severity: str  # "ALTA", "MEDIA", "BAJA"
-    code: str      # p.ej. "SEC001", "SEC002", "TYP001"
+    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "TYP001"
     message: str
 
 
@@ -83,6 +83,13 @@ SECURITY_PATTERNS: tuple[RegexSecurityPattern, ...] = (
         pattern=re.compile(r"(?:mongodb|postgres|postgresql|mysql)://[^:]+:[^@]+@"),
         message="Cadena de conexión a base de datos con credenciales expuestas en texto plano.",
     ),
+    # SEC005: Enlaces a CDNs externas en HTML sin atributo Subresource Integrity (SRI)
+    RegexSecurityPattern(
+        code="SEC005",
+        severity="MEDIA",
+        pattern=re.compile(r"<(?:script\s+[^>]*src|link\s+[^>]*href)=['\"]https?://[^'\"]+['\"](?![^>]*\bintegrity=)[^>]*>", re.IGNORECASE),
+        message="Inclusión de recurso CDN externo en HTML sin el atributo de seguridad Subresource Integrity (SRI).",
+    ),
 )
 
 
@@ -142,7 +149,7 @@ class ASTQualityVisitor(ast.NodeVisitor):
 
 def analyze_file(file_path: Path) -> Sequence[IssueItem]:
     """
-    Analiza de forma estática cualquier archivo de código fuente soportado (Python, JS, TS, PHP, JSON, .env, etc.).
+    Analiza de forma estática cualquier archivo de código fuente soportado (Python, JS, TS, PHP, HTML, JSON, .env, etc.).
 
     Args:
         file_path: Ruta del archivo a analizar.
@@ -150,7 +157,7 @@ def analyze_file(file_path: Path) -> Sequence[IssueItem]:
     Returns:
         Secuencia de incidencias detectadas.
     """
-    if not file_path.exists() or file_path.suffix not in SUPPORTED_EXTENSIONS and file_path.name != ".env":
+    if not file_path.exists() or (file_path.suffix not in SUPPORTED_EXTENSIONS and file_path.name != ".env"):
         return []
 
     issues: list[IssueItem] = []
@@ -192,7 +199,6 @@ def analyze_file(file_path: Path) -> Sequence[IssueItem]:
             visitor.visit(tree)
             issues.extend(visitor.issues)
         except Exception:
-            # Si el archivo Python contiene sintaxis incompleta, el motor Regex ya habrá procesado las líneas
             pass
 
     return issues

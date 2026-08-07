@@ -6,7 +6,7 @@ from typing import Final
 
 # Nombre de la aplicación y versión
 APP_NAME: Final[str] = "Antigravity Sentinel"
-VERSION: Final[str] = "0.2.0"
+VERSION: Final[str] = "0.3.0"
 
 # Extensiones de archivos de código soportadas para análisis
 SUPPORTED_EXTENSIONS: Final[set[str]] = {
@@ -14,6 +14,8 @@ SUPPORTED_EXTENSIONS: Final[set[str]] = {
     ".js",
     ".ts",
     ".php",
+    ".html",
+    ".htm",
     ".json",
     ".env",
     ".yml",
@@ -33,6 +35,13 @@ IGNORE_DIRS: Final[set[str]] = {
     ".mypy_cache",
     ".pytest_cache",
 }
+
+# Constantes de formato y colores ANSI para consola
+COLOR_RED: Final[str] = "\033[91m"
+COLOR_YELLOW: Final[str] = "\033[93m"
+COLOR_GREEN: Final[str] = "\033[92m"
+COLOR_BOLD: Final[str] = "\033[1m"
+COLOR_RESET: Final[str] = "\033[0m"
 
 # Codificación por defecto
 DEFAULT_ENCODING: Final[str] = "utf-8"

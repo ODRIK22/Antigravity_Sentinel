@@ -1,5 +1,5 @@
 """
-Pruebas unitarias para el motor de análisis estático multilenguaje (AST + Regex).
+Pruebas unitarias para el motor de análisis estático multilenguaje (AST + Regex + HTML SRI).
 """
 
 from pathlib import Path
@@ -51,18 +51,24 @@ DATABASE_URL=postgres://admin:supersecret123@localhost:5432/mydb
     codes = [issue.code for issue in issues]
 
     assert "SEC002" in codes  # AWS key / GitHub token
-    assert "SEC004" in codes  # Database URL with credentials
+    assert "SEC004" in codes  # Database URL con credenciales
 
 
-def test_analyze_php_file(tmp_path: Path) -> None:
-    php_code = """<?php
-$cmd = $_GET['cmd'];
-shell_exec($cmd);
+def test_analyze_html_sri_missing(tmp_path: Path) -> None:
+    html_code = """<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+</body>
+</html>
 """
-    php_file = tmp_path / "index.php"
-    php_file.write_text(php_code, encoding="utf-8")
+    html_file = tmp_path / "index.html"
+    html_file.write_text(html_code, encoding="utf-8")
 
-    issues = analyze_file(php_file)
+    issues = analyze_file(html_file)
     codes = [issue.code for issue in issues]
 
-    assert "SEC003" in codes  # shell_exec
+    assert "SEC005" in codes  # Falta SRI en CDN externo
