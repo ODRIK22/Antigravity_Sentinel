@@ -2,12 +2,13 @@
 
 ![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 ![Type Checking](https://img.shields.io/badge/mypy-strict-brightgreen.svg)
-![Tests Pass](https://img.shields.io/badge/tests-15%20passed-success.svg)
+![Tests Pass](https://img.shields.io/badge/tests-19%20passed-success.svg)
 ![SARIF Standard](https://img.shields.io/badge/SARIF-v2.1.0-purple.svg)
+![SCA Analysis](https://img.shields.io/badge/SCA-Dependencies-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Architecture](https://img.shields.io/badge/architecture-Zero%20Trust%20%7C%20100%25%20Offline-orange.svg)
 
-**Antigravity Sentinel** es una herramienta avanzada de análisis estático de código (SAST), auditoría de calidad de software, **Taint Analysis**, exportación estándar **SARIF v2.1.0** para CI/CD, parcheado interactivo y conector con IA Local (Ollama).
+**Antigravity Sentinel** es una herramienta avanzada de análisis estático de código (SAST), **Análisis de Componentes de Software (SCA)**, **Taint Analysis**, exportación **SARIF v2.1.0**, monitorización en tiempo real (`watch`) y conector con IA Local (Ollama).
 
 Diseñado y desarrollado utilizando la metodología **Spec-Kit** dentro de la plataforma Antigravity, Sentinel está preparado para integrarse en pipelines de integración continua (GitHub Security, CodeQL, GitLab CI) garantizando privacidad 100% offline y arquitectura Zero Trust.
 
@@ -15,14 +16,14 @@ Diseñado y desarrollado utilizando la metodología **Spec-Kit** dentro de la pl
 
 ## 🚀 Características Principales
 
-- **Exportación en Estándar SARIF v2.1.0:** Genera reportes en formato OASIS SARIF (`--format sarif`) integrables de forma nativa con GitHub Code Scanning, GitLab Security Dashboard o CodeQL.
-- **Modo Interactivo de Aplicación de Parches (`--apply-patch`):** Permite revisar visualmente el diff en consola y decidir interactivamente si se aplican los cambios al archivo fuente, creando automáticamente una copia de respaldo `.bak`.
+- **Análisis de Componentes de Software (SCA):** Audita manifiestos de dependencias (`requirements.txt` y `package.json`) buscando versiones obsoletas o vulnerabilidades conocidas (`SCA001`, `SCA002`).
+- **Soporte para Exclusiones Personalizadas (`.sentinelignore`):** Lee patrones tipo `.gitignore` desde un archivo local `.sentinelignore` para omitir rutas específicas durante las inspecciones.
+- **Modo Watch en Tiempo Real (`sentinel watch`):** Monitor de archivos en segundo plano que detecta cambios sintácticos y ejecuta escaneos incrementales automáticos al guardar.
+- **Exportación en Estándar SARIF v2.1.0 (`--format sarif`):** Genera reportes en formato OASIS SARIF v2.1.0 integrables con GitHub Code Scanning o GitLab.
+- **Modo Interactivo de Aplicación de Parches (`--apply-patch`):** Permite revisar visualmente el diff en consola y decidir interactivamente si se aplican los cambios al archivo fuente, creando de forma automática un respaldo `.bak`.
 - **Prompting Enriquecido con IA Local (Ollama):** Construye snippets de código circundantes (+/- 5 líneas) alrededor de cada falla para enviar a Ollama (`--explain-local`), obteniendo explicaciones y refactorizaciones precisas 100% offline.
 - **Taint Analysis Ligero (Rastreo Fuente a Sink):** Detecta variables no sanitizadas que fluyen desde fuentes de entrada de usuario (`req.body`, `sys.argv`, etc.) hasta funciones críticas (`eval`, `exec`, `subprocess`) (`TAINT001`).
-- **Analizador Estático Basado en AST y Regex Híbrido:**
-  - Omisión inteligente de comentarios.
-  - Tipado (`TYP001`, `TYP002`), credenciales expuestas (`SEC002`), funciones peligrosas (`SEC003`), URIs de BD (`SEC004`), SRI en HTML (`SEC005`), e Inyección NoSQL (`SEC006`).
-- **Verificación Completa:** Suite de 15 pruebas unitarias con `pytest` y tipado 100% verificado con `mypy` en modo estricto.
+- **Verificación Completa:** Suite de 19 pruebas unitarias con `pytest` y tipado 100% verificado con `mypy` en modo estricto.
 
 ---
 
@@ -33,21 +34,27 @@ Antigravity_Sentinel/
 ├── .specify/                   # Configuración y memoria del flujo Spec-Kit
 ├── sentinel/                   # Paquete principal
 │   ├── __init__.py
-│   ├── cli.py                  # Interfaz CLI con subcomandos scan y patch
+│   ├── cli.py                  # Interfaz CLI (scan, sca, watch, patch)
 │   ├── config.py               # Constantes globales
 │   └── core/
 │       ├── analyzer.py         # Motor híbrido AST (Taint Analysis) + Regex
 │       ├── sanitizer.py        # Validación y sanitización de rutas/entradas
-│       ├── reporter.py         # Formateador de consola ANSI, JSON y SARIF v2.1.0
-│       ├── patcher.py          # Generador de Artifacts y aplicación interactiva (--apply-patch)
-│       └── ollama.py           # Conector con IA Local (Ollama) y contexto enriquecido
-├── tests/                      # Suite de 15 pruebas automáticas (pytest)
+│       ├── reporter.py         # Formateador ANSI, JSON y SARIF v2.1.0
+│       ├── patcher.py          # Generador de Artifacts e interactivo (--apply-patch)
+│       ├── ollama.py           # Conector con IA Local (Ollama)
+│       ├── ignore.py           # Gestor de patrones .sentinelignore
+│       ├── sca.py              # Análisis de dependencias (requirements.txt / package.json)
+│       └── watcher.py          # Monitor de archivos en tiempo real
+├── tests/                      # Suite de 19 pruebas automáticas (pytest)
 │   ├── test_analyzer.py
 │   ├── test_cli.py
+│   ├── test_ignore.py
 │   ├── test_ollama.py
 │   ├── test_patcher.py
 │   ├── test_reporter.py
-│   └── test_sanitizer.py
+│   ├── test_sanitizer.py
+│   ├── test_sca.py
+│   └── test_watcher.py
 ├── pyproject.toml              # Configuración del paquete, mypy y pytest
 ├── LICENSE                     # Licencia MIT
 └── README.md                   # Documentación principal
@@ -74,20 +81,25 @@ pip install -e .
 # Reporte en consola con colores ANSI
 python -m sentinel.cli scan --path ./sentinel
 
-# Exportación en formato SARIF v2.1.0 para GitHub Actions / CI/CD
+# Exportación en formato SARIF v2.1.0
 python -m sentinel.cli scan --path ./sentinel --format sarif > results.sarif
-
-# Escaneo con explicación enriquecida de IA Local (Ollama)
-python -m sentinel.cli scan --path ./sentinel --explain-local
 ```
 
-### 2. Generación y Aplicación Interactiva de Parches (`patch`)
+### 2. Análisis de Dependencias SCA (`sca`)
 
 ```bash
-# Generar propuesta de parche Zero Trust (Artifact Markdown)
-python -m sentinel.cli patch --file ./sentinel/cli.py
+python -m sentinel.cli sca --path .
+```
 
-# Revisar y aplicar cambios interactivamente en el archivo fuente (crea backup .bak)
+### 3. Modo Watch en Tiempo Real (`watch`)
+
+```bash
+python -m sentinel.cli watch --path ./sentinel
+```
+
+### 4. Generación y Aplicación Interactiva de Parches (`patch`)
+
+```bash
 python -m sentinel.cli patch --file ./sentinel/cli.py --apply-patch
 ```
 
