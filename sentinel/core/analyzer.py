@@ -1,5 +1,5 @@
 """
-Motor de análisis estático híbrido (AST de Python con Taint Analysis + Motor Regex Multilenguaje + SRI HTML) para Antigravity Sentinel.
+Motor de análisis estático híbrido (AST de Python + Universal AST Multi-lenguaje + SRI HTML + NoSQL Injection) para Antigravity Sentinel.
 """
 
 import ast
@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from sentinel.config import SUPPORTED_EXTENSIONS
+from sentinel.core.rules import get_rules_for_extension
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ class IssueItem:
     file_path: str
     line_number: int
     severity: str  # "ALTA", "MEDIA", "BAJA"
-    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "SEC006", "TAINT001", "TYP001"
+    code: str      # p.ej. "SEC001", "SEC002", "SEC005", "SEC006", "TAINT001", "TAINT003", "TYP001"
     message: str
 
 
@@ -113,7 +114,6 @@ class ASTQualityVisitor(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Rastrear si una variable recibe datos desde una fuente de entrada de usuario (Source)."""
-        # Verificar el lado derecho de la asignación
         value_str = ""
         if isinstance(node.value, ast.Name):
             value_str = node.value.id
@@ -133,7 +133,6 @@ class ASTQualityVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Verifica que las funciones posean anotaciones de retorno y parámetros, e inspecciona Taint en argumentos."""
-        # Marcar argumentos sospechosos como 'user_input' o 'input_data' como contaminados
         for arg in node.args.args:
             if arg.arg in ("user_input", "input_data", "payload", "raw_data"):
                 self.tainted_vars.add(arg.arg)
@@ -171,7 +170,6 @@ class ASTQualityVisitor(ast.NodeVisitor):
             func_name = node.func.attr
 
         if func_name in CRITICAL_SINKS or any(sink in func_name for sink in ("eval", "exec", "system")):
-            # Verificar si algún argumento está en self.tainted_vars
             for arg in node.args:
                 arg_name = ""
                 if isinstance(arg, ast.Name):
@@ -211,7 +209,6 @@ def _strip_comments(line: str) -> str:
     stripped = line.strip()
     if stripped.startswith("#") or stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
         return ""
-    # Remover comentarios inline simples
     if "#" in line:
         line = line.split("#")[0]
     elif "//" in line and not ("http://" in line or "https://" in line):
@@ -267,7 +264,12 @@ def analyze_file(file_path: Path) -> Sequence[IssueItem]:
                     )
                 )
 
-    # 2. Taint Analysis y AST Avanzado para archivos Python
+    # 2. Análisis por AST Universal (PHP, Go, JS/TS, Python)
+    from sentinel.core.universal_ast import UniversalASTAnalyzer
+    universal_ast = UniversalASTAnalyzer(file_path)
+    issues.extend(universal_ast.analyze())
+
+    # 3. Taint Analysis y AST Avanzado específico para archivos Python
     if file_path.suffix == ".py":
         try:
             tree = ast.parse(source_code, filename=str(file_path))

@@ -6,7 +6,7 @@ from typing import Final
 
 # Nombre de la aplicación y versión
 APP_NAME: Final[str] = "Antigravity Sentinel"
-VERSION: Final[str] = "0.8.0"
+VERSION: Final[str] = "0.9.0"
 
 # Extensiones de archivos de código soportadas para análisis
 SUPPORTED_EXTENSIONS: Final[set[str]] = {
@@ -14,6 +14,7 @@ SUPPORTED_EXTENSIONS: Final[set[str]] = {
     ".js",
     ".ts",
     ".php",
+    ".go",
     ".html",
     ".htm",
     ".json",

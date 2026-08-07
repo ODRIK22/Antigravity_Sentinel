@@ -1,9 +1,9 @@
 """
-Pruebas unitarias para el análisis SCA de dependencias.
+Pruebas unitarias para el análisis SCA de dependencias multi-ecosistema.
 """
 
 from pathlib import Path
-from sentinel.core.sca import analyze_dependencies, analyze_requirements_txt, analyze_package_json
+from sentinel.core.sca import analyze_dependencies, analyze_requirements_txt, analyze_package_json, analyze_composer_json, analyze_go_mod
 
 
 def test_sca_requirements_txt_vulnerable(tmp_path: Path) -> None:
@@ -30,3 +30,27 @@ def test_sca_package_json_vulnerable(tmp_path: Path) -> None:
     codes = [i.code for i in issues]
 
     assert "SCA001" in codes  # express / lodash vulnerables
+
+
+def test_sca_composer_json_vulnerable(tmp_path: Path) -> None:
+    composer_file = tmp_path / "composer.json"
+    composer_file.write_text("""{
+        "require": {
+            "laravel/framework": "9.2.0"
+        }
+    }""", encoding="utf-8")
+
+    issues = analyze_composer_json(composer_file)
+    codes = [i.code for i in issues]
+
+    assert "SCA001" in codes  # laravel < 10.10.0
+
+
+def test_sca_go_mod_vulnerable(tmp_path: Path) -> None:
+    go_file = tmp_path / "go.mod"
+    go_file.write_text("module myapp\n\ngo 1.20\n\nrequire github.com/gin-gonic/gin v1.8.0\n", encoding="utf-8")
+
+    issues = analyze_go_mod(go_file)
+    codes = [i.code for i in issues]
+
+    assert "SCA001" in codes  # gin-gonic < v1.9.0
